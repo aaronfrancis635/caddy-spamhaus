@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	caddy.RegisterModule(new(SpamhausDROP))
+	caddy.RegisterModule(&SpamhausDROP{})
 }
 
 const (
