@@ -1,6 +1,6 @@
 module github.com/aaronfrancis635/caddy-spamhaus
 
-go 1.26.1
+go 1.25
 
 require (
 	cel.dev/expr v0.25.1 // indirect
