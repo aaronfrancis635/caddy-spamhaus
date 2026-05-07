@@ -28,7 +28,7 @@ http.ip_sources.spamhaus_drop
 | Field              | Type     | Default                                          | Description                                   |
 |--------------------|----------|--------------------------------------------------|-----------------------------------------------|
 | `url`              | `string` | `https://www.spamhaus.org/drop/drop_v4.json`     | URL of the Spamhaus JSON DROP list to fetch.  |
-| `refresh_interval` | `string` | `24h`                                            | How often to refresh the list   |
+| `refresh_interval` | `string` | `24h`                                            | How often to refresh the list.   |
 
 ### Caddyfile
 
