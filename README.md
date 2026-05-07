@@ -80,6 +80,7 @@ example.com {
 ```
 
 ### `trusted_proxies` (Caddyfile)
+> I don't know why you'd want this, but it works I guess
 
 Uses `http.ip_sources.spamhaus_drop`:
 
