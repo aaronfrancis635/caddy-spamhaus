@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 func init() {
 	caddy.RegisterModule(&SpamhausDROP{})
+	caddy.RegisterModule(&SpamhausDropMatcher{})
 }
 
 const (
@@ -210,4 +212,154 @@ var (
 	_ caddy.CleanerUpper      = (*SpamhausDROP)(nil)
 	_ caddyfile.Unmarshaler   = (*SpamhausDROP)(nil)
 	_ caddyhttp.IPRangeSource = (*SpamhausDROP)(nil)
+)
+
+//	@blocked {
+//	    spamhaus_drop
+//	}
+//
+// abort @blocked
+type SpamhausDropMatcher struct {
+	URL string `json:"url,omitempty"`
+
+	RefreshInterval caddy.Duration `json:"refresh_interval,omitempty"`
+
+	logger *zap.Logger
+	mu     sync.RWMutex
+	ranges []netip.Prefix
+	cancel context.CancelFunc
+}
+
+func (*SpamhausDropMatcher) CaddyModule() caddy.ModuleInfo {
+	return caddy.ModuleInfo{
+		ID:  "http.matchers.spamhaus_drop",
+		New: func() caddy.Module { return new(SpamhausDropMatcher) },
+	}
+}
+
+func (m *SpamhausDropMatcher) Provision(ctx caddy.Context) error {
+	m.logger = ctx.Logger()
+	if m.URL == "" {
+		m.URL = defaultURL
+	}
+	if m.RefreshInterval == 0 {
+		m.RefreshInterval = caddy.Duration(defaultInterval)
+	}
+
+	if err := m.fetchAndStore(); err != nil {
+		return fmt.Errorf("spamhaus_drop matcher: initial fetch from %s failed: %w", m.URL, err)
+	}
+
+	bgCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
+	go m.refreshLoop(bgCtx)
+	return nil
+}
+
+func (m *SpamhausDropMatcher) Cleanup() error {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	return nil
+}
+
+func (m *SpamhausDropMatcher) Match(r *http.Request) bool {
+	host, err := parseRemoteAddr(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, prefix := range m.ranges {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *SpamhausDropMatcher) MatchWithError(r *http.Request) (bool, error) {
+	return m.Match(r), nil
+}
+
+func (m *SpamhausDropMatcher) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Duration(m.RefreshInterval))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.fetchAndStore(); err != nil {
+				m.logger.Error("spamhaus_drop matcher: refresh failed; using cached list",
+					zap.String("url", m.URL),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+}
+
+func (m *SpamhausDropMatcher) fetchAndStore() error {
+	prefixes, err := fetchDropList(m.URL)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.ranges = prefixes
+	m.mu.Unlock()
+	if m.logger != nil {
+		m.logger.Info("spamhaus_drop matcher: list refreshed",
+			zap.String("url", m.URL),
+			zap.Int("prefixes", len(prefixes)),
+		)
+	}
+	return nil
+}
+
+func (m *SpamhausDropMatcher) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	d.Next()
+	if d.NextArg() {
+		m.URL = d.Val()
+	}
+	for d.NextBlock(0) {
+		switch d.Val() {
+		case "url":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			m.URL = d.Val()
+		case "refresh_interval":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			dur, err := time.ParseDuration(d.Val())
+			if err != nil {
+				return d.Errf("invalid refresh_interval %q: %v", d.Val(), err)
+			}
+			m.RefreshInterval = caddy.Duration(dur)
+		default:
+			return d.Errf("unknown subdirective %q", d.Val())
+		}
+	}
+	return nil
+}
+
+func parseRemoteAddr(remote string) (host string, err error) {
+	if h, _, err := net.SplitHostPort(remote); err == nil {
+		return h, nil
+	}
+	return remote, nil
+}
+
+var (
+	_ caddy.Provisioner                 = (*SpamhausDropMatcher)(nil)
+	_ caddy.CleanerUpper                = (*SpamhausDropMatcher)(nil)
+	_ caddyfile.Unmarshaler             = (*SpamhausDropMatcher)(nil)
+	_ caddyhttp.RequestMatcherWithError = (*SpamhausDropMatcher)(nil)
 )

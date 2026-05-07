@@ -2,6 +2,15 @@
 
 A caddy module to add support for Spamhaus DROP lists in the new JSON format.
 
+## Modules
+
+| Module ID | Use |
+|---|---|
+| `http.matchers.spamhaus_drop` | Match inbound requests by remote IP |
+| `http.ip_sources.spamhaus_drop` | IP range source for `trusted_proxies` |
+
+The list is fetched once at startup then refreshed in the background (default every 24 h). If a refresh fails the previously cached list continues to be used.
+
 ---
 
 ## Installation
@@ -9,47 +18,30 @@ A caddy module to add support for Spamhaus DROP lists in the new JSON format.
 Using [`xcaddy`](https://github.com/caddyserver/xcaddy):
 
 ```sh
-$ xcaddy build --with github.com/aaronfrancis635/caddy-spamhaus
+xcaddy build --with github.com/aaronfrancis635/caddy-spamhaus
 ```
 
 ---
 
 ## Configuration
 
-### Module ID
+Both modules share the same options:
 
-```
-http.ip_sources.spamhaus_drop
-```
+| Field              | Type     | Default                                      | Description                          |
+|--------------------|----------|----------------------------------------------|--------------------------------------|
+| `url`              | `string` | `https://www.spamhaus.org/drop/drop_v4.json` | URL of the Spamhaus JSON DROP list.  |
+| `refresh_interval` | `string` | `24h`                                        | How often to refresh the list.       |
 
-### Config
-
-
-| Field              | Type     | Default                                          | Description                                   |
-|--------------------|----------|--------------------------------------------------|-----------------------------------------------|
-| `url`              | `string` | `https://www.spamhaus.org/drop/drop_v4.json`     | URL of the Spamhaus JSON DROP list to fetch.  |
-| `refresh_interval` | `string` | `24h`                                            | How often to refresh the list.   |
-
-### Caddyfile
-
-The module can be used anywhere Caddy accepts an `ip_sources` block, for
-example inside a `remote_ip` matcher or as `trusted_proxies` (if you for some reason want that?).
-
-**Minimal (all defaults):**
+**Caddyfile syntax (both modules):**
 
 ```caddyfile
+# Minimal
 spamhaus_drop
-```
 
-**With an inline URL:**
-
-```caddyfile
+# Inline URL
 spamhaus_drop https://www.spamhaus.org/drop/drop_v6.json
-```
 
-**With a block (all options):**
-
-```caddyfile
+# Block with all options
 spamhaus_drop {
     url              https://www.spamhaus.org/drop/drop_v4.json
     refresh_interval 6h
@@ -60,14 +52,26 @@ spamhaus_drop {
 
 ## Usage examples
 
-### Block requests from Spamhaus DROP IPs
+### Block inbound requests from Spamhaus DROP IPs (Caddyfile)
+
+Uses `http.matchers.spamhaus_drop`:
 
 ```caddyfile
 example.com {
-    @blocked remote_ip {
-        ranges {
-            source spamhaus_drop
-        }
+    @blocked spamhaus_drop
+    abort @blocked
+
+    respond "Hello, world!"
+}
+```
+
+With options:
+
+```caddyfile
+example.com {
+    @blocked spamhaus_drop {
+        url              https://www.spamhaus.org/drop/drop_v4.json
+        refresh_interval 6h
     }
     abort @blocked
 
@@ -75,21 +79,9 @@ example.com {
 }
 ```
 
-### Combine with other IP sources
+### `trusted_proxies` (Caddyfile)
 
-```caddyfile
-example.com {
-    @blocked remote_ip {
-        ranges {
-            source spamhaus_drop
-            source static 10.0.0.0/8
-        }
-    }
-    abort @blocked
-}
-```
-
-### Use as `trusted_proxies`
+Uses `http.ip_sources.spamhaus_drop`:
 
 ```caddyfile
 {
@@ -99,15 +91,24 @@ example.com {
 }
 ```
 
+With options:
+
+```caddyfile
+{
+    servers {
+        trusted_proxies spamhaus_drop {
+            url              https://www.spamhaus.org/drop/drop_v4.json
+            refresh_interval 6h
+        }
+    }
+}
+```
+
 ---
 
 ## Available DROP lists
 
-| Description          | URL                                                         |
-|----------------------|-------------------------------------------------------------|
-| IPv4 DROP (default)  | `https://www.spamhaus.org/drop/drop_v4.json`                |
-| IPv6 DROP            | `https://www.spamhaus.org/drop/drop_v6.json`                |
-
-
----
-
+| Description         | URL                                              |
+|---------------------|--------------------------------------------------|
+| IPv4 DROP (default) | `https://www.spamhaus.org/drop/drop_v4.json`     |
+| IPv6 DROP           | `https://www.spamhaus.org/drop/drop_v6.json`     |
